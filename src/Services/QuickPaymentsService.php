@@ -21,16 +21,25 @@ class QuickPaymentsService
     protected $merchantKey;
 
     /**
+     * The QuickPayments key.
+     *
+     * @var string|null
+     */
+    protected $quickPaymentsKey;
+
+    /**
      * Create a new QuickPayments service instance.
      *
      * @param  \MiPaymentChoice\Cashier\Services\ApiClient  $api
      * @param  string  $merchantKey
+     * @param  string|null  $quickPaymentsKey
      * @return void
      */
-    public function __construct(ApiClient $api, $merchantKey)
+    public function __construct(ApiClient $api, $merchantKey, $quickPaymentsKey = null)
     {
         $this->api = $api;
         $this->merchantKey = $merchantKey;
+        $this->quickPaymentsKey = $quickPaymentsKey;
     }
 
     /**
@@ -41,6 +50,12 @@ class QuickPaymentsService
      */
     protected function getQuickPaymentsKey(): string
     {
+        // Use configured key if available
+        if ($this->quickPaymentsKey) {
+            return $this->quickPaymentsKey;
+        }
+        
+        // Fall back to fetching from API
         $response = $this->getMerchantKey();
         return $response['QuickPaymentsKey'] ?? '';
     }
@@ -103,7 +118,7 @@ class QuickPaymentsService
             'CardData' => $cardData,
         ];
 
-        return $this->api->post('/quickpayments/qp-tokens', $payload);
+        return $this->api->post('/api//quickpayments/qp-tokens', $payload);
     }
 
     /**
@@ -154,7 +169,7 @@ class QuickPaymentsService
             'CheckData' => $checkData,
         ];
 
-        return $this->api->post('/quickpayments/qp-tokens', $payload);
+        return $this->api->post('/api//quickpayments/qp-tokens', $payload);
     }
 
     /**
@@ -174,7 +189,7 @@ class QuickPaymentsService
             $quickPaymentsKey = $this->getQuickPaymentsKey();
         }
 
-        return $this->api->post('/quickpayments/tokens', [
+        return $this->api->post('/api//quickpayments/tokens', [
             'QuickPaymentsKey' => $quickPaymentsKey,
             'QuickPaymentsToken' => $qpToken,
             'TokenFormat' => $tokenFormat,
@@ -189,7 +204,7 @@ class QuickPaymentsService
      */
     public function getMerchantKey(): array
     {
-        return $this->api->get("/quickpayments/merchants/{$this->merchantKey}/keys");
+        return $this->api->get("/api//quickpayments/merchants/{$this->merchantKey}/keys");
     }
 
     /**
@@ -202,7 +217,7 @@ class QuickPaymentsService
      */
     public function createMerchantKey(): array
     {
-        return $this->api->post("/quickpayments/merchants/{$this->merchantKey}/keys", [
+        return $this->api->post("/api//quickpayments/merchants/{$this->merchantKey}/keys", [
             'MerchantKey' => (int) $this->merchantKey,
         ]);
     }
@@ -215,7 +230,7 @@ class QuickPaymentsService
      */
     public function deleteMerchantKey(): array
     {
-        return $this->api->delete("/quickpayments/merchants/{$this->merchantKey}/keys");
+        return $this->api->delete("/api//quickpayments/merchants/{$this->merchantKey}/keys");
     }
 
     /**
@@ -232,24 +247,23 @@ class QuickPaymentsService
     public function charge(string $qpToken, float $amount, array $options = []): array
     {
         $payload = [
-            'Amount' => $amount,
-            'Currency' => $options['currency'] ?? config('mipaymentchoice.currency'),
-            'QpToken' => $qpToken,
+            'TransactionType' => 'Sale',
+            'ForceDuplicate' => true,
+            'Token' => $qpToken,
+            'InvoiceData' => [
+                'TotalAmount' => $amount,
+            ],
         ];
 
         if (isset($options['description'])) {
-            $payload['Description'] = $options['description'];
+            $payload['InvoiceData']['InvoiceNumber'] = $options['description'];
         }
 
-        if (isset($options['reference'])) {
-            $payload['Reference'] = $options['reference'];
+        if (isset($options['invoice_number'])) {
+            $payload['InvoiceData']['InvoiceNumber'] = $options['invoice_number'];
         }
 
-        if (isset($options['metadata'])) {
-            $payload['Metadata'] = $options['metadata'];
-        }
-
-        return $this->api->post('/api/v2/transaction', $payload);
+        return $this->api->post('/api/v2/transactions/bcp', $payload);
     }
 
     /**

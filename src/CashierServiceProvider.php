@@ -39,7 +39,8 @@ class CashierServiceProvider extends ServiceProvider
         $this->app->singleton(QuickPaymentsService::class, function ($app) {
             return new QuickPaymentsService(
                 $app->make(ApiClient::class),
-                config('mipaymentchoice.merchant_key')
+                config('mipaymentchoice.merchant_key'),
+                config('mipaymentchoice.quickpayments_key')
             );
         });
     }

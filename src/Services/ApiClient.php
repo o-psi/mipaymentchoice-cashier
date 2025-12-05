@@ -67,7 +67,7 @@ class ApiClient
     {
         return Cache::remember('mipaymentchoice_bearer_token', 3600, function () {
             try {
-                $response = $this->client->request('GET', '/api/authenticate', [
+                $response = $this->client->request('POST', '/api/authenticate', [
                     'json' => [
                         'Username' => $this->username,
                         'Password' => $this->password,
