@@ -11,9 +11,9 @@ use Illuminate\Support\Facades\Log;
  * Service for pulling MiPaymentChoice settlement reports.
  *
  * Wraps:
- *   GET /reports/settlements/              — list batches by date range
- *   GET /reports/settlements/{batchId}     — transaction detail for one batch
- *   GET /reports/settlements/closed        — list closed batches
+ *   GET /api/reports/settlements           — list batches by date range
+ *   GET /api/reports/settlements/{batchId} — transaction detail for one batch
+ *   GET /api/reports/settlements/closed    — list closed batches
  */
 class ReportService
 {
@@ -23,7 +23,6 @@ class ReportService
      * List settlement batches for a date range.
      *
      * @param  string  $beginDate  ISO-8601 or Y-m-d
-     * @param  string|null  $endDate
      * @return array<int, array{BatchId: string, BatchDate: string, TransactionCount: int, SaleAmount: float, ReturnAmount: float, TotalAmount: float, MID: string}>
      *
      * @throws ApiException
@@ -37,7 +36,7 @@ class ReportService
         ]);
 
         try {
-            $response = $this->api->get('/reports/settlements/', $query);
+            $response = $this->api->get('/api/reports/settlements', $query);
 
             Log::info('MPC settlement batches fetched', [
                 'begin' => $beginDate,
@@ -60,22 +59,24 @@ class ReportService
     /**
      * Get transaction-level detail for a single settlement batch.
      *
-     * @param  string  $batchId
-     * @return array<int, array{TransactionId: int, Timestamp: string, PaymentType: string, TransactionType: string, Amount: float, Payer: string}>
+     * @return array<int, array{TransactionId: string, Timestamp: string|null, PaymentType: string|null, TransactionType: string|null, Amount: float, Payer: string|null}>
      *
      * @throws ApiException
      */
     public function getBatchDetail(string $batchId): array
     {
         try {
-            $response = $this->api->get("/reports/settlements/{$batchId}", ['PageSize' => 500]);
+            $response = $this->api->get("/api/reports/settlements/{$batchId}", ['PageSize' => 500]);
 
             Log::info('MPC batch detail fetched', [
                 'batch_id' => $batchId,
                 'count' => count($response['Transactions'] ?? $response),
             ]);
 
-            return $response['Transactions'] ?? (is_array($response) ? $response : []);
+            return array_map(
+                fn (array $transaction): array => $this->normalizeTransaction($transaction),
+                $response['Transactions'] ?? (is_array($response) ? $response : []),
+            );
         } catch (ApiException $e) {
             Log::error('MPC batch detail fetch failed', [
                 'batch_id' => $batchId,
@@ -100,7 +101,7 @@ class ReportService
         ]);
 
         try {
-            $response = $this->api->get('/reports/settlements/closed', $query);
+            $response = $this->api->get('/api/reports/settlements/closed', $query);
 
             return $response['Batches'] ?? (is_array($response) ? $response : []);
         } catch (ApiException $e) {
@@ -110,5 +111,38 @@ class ReportService
 
             throw $e;
         }
+    }
+
+    /**
+     * Normalize the gateway's nested settlement transaction into the stable
+     * reporting shape consumed by applications using this package.
+     *
+     * @param  array<string, mixed>  $transaction
+     * @return array{TransactionId: string, Timestamp: string|null, PaymentType: string|null, TransactionType: string|null, Amount: float, Payer: string|null}
+     */
+    private function normalizeTransaction(array $transaction): array
+    {
+        $transactionType = $transaction['TransactionType'] ?? null;
+        $amount = (float) ($transaction['CardDetail']['TotalAmount']
+            ?? $transaction['CheckDetail']['CheckAmount']
+            ?? $transaction['CashDetail']['CashAmount']
+            ?? $transaction['Amount']
+            ?? 0);
+
+        if (is_string($transactionType) && in_array(strtolower($transactionType), ['return', 'refund', 'credit'], true)) {
+            $amount = -abs($amount);
+        }
+
+        return [
+            'TransactionId' => (string) ($transaction['TransactionId'] ?? $transaction['PnRef'] ?? ''),
+            'Timestamp' => $transaction['TransactionTimestamp'] ?? $transaction['SettlementTimestamp'] ?? null,
+            'PaymentType' => $transaction['PaymentType'] ?? null,
+            'TransactionType' => $transactionType,
+            'Amount' => $amount,
+            'Payer' => $transaction['CardDetail']['NameOnCard']
+                ?? $transaction['CheckDetail']['NameOnCheck']
+                ?? $transaction['CustomerReference']
+                ?? null,
+        ];
     }
 }
